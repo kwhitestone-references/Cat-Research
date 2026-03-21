@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🐱 C-Agent · 多智能体深度研究系统
+# 🐱 Cat-Agent · 多智能体深度研究系统
 
 **让 AI 像专业研究员一样思考、验证、迭代**
 
@@ -19,9 +19,9 @@
 
 ### 项目简介
 
-C-Agent 是一个**多智能体协作深度研究系统**，将一个研究问题分解为 8 个专业阶段，由 8 个不同职责的 AI 智能体协同完成，最终输出经过来源验证、事实核查、结论验证的高质量研究报告。
+Cat-Agent 是一个**多智能体协作深度研究系统**，将一个研究问题分解为 8 个专业阶段，由 8 个不同职责的 AI 智能体协同完成，最终输出经过来源验证、事实核查、结论验证的高质量研究报告。
 
-不同于普通的 AI 问答，C-Agent 会：
+不同于普通的 AI 问答，Cat-Agent 会：
 - 🔍 **主动搜索**最新网络信息（时效优先）
 - 🔗 **验证来源**权威性（7 级评分体系）
 - ✅ **核查事实**（交叉验证关键声明）
@@ -223,9 +223,9 @@ CORS_ORIGINS=http://localhost:8000
 
 ### Overview
 
-**C-Agent** is a multi-agent collaborative deep research system. It decomposes a research question into 8 specialized stages, processed by 8 AI agents with distinct roles, ultimately delivering a high-quality research report with source verification, fact-checking, and conclusion validation.
+**Cat-Agent** is a multi-agent collaborative deep research system. It decomposes a research question into 8 specialized stages, processed by 8 AI agents with distinct roles, ultimately delivering a high-quality research report with source verification, fact-checking, and conclusion validation.
 
-Unlike simple AI Q&A tools, C-Agent will:
+Unlike simple AI Q&A tools, Cat-Agent will:
 - 🔍 **Actively search** for the latest web information (recency-first)
 - 🔗 **Verify sources** with a 7-tier authority scoring system
 - ✅ **Fact-check** claims through cross-reference validation
