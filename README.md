@@ -24,7 +24,7 @@
 
 不同于普通的 AI 问答，Cat-Research 会：
 
-- 🔍 **主动搜索**：实时抓取最新网络信息（时效优先）
+- 🔍 **主动搜索**：通过智谱 Search API 实时获取最新网络信息，自动按时效过滤（优先近 3 个月）
 - 🔗 **验证来源**：7 级权威性评分体系（Tier 1–4）
 - ✅ **核查事实**：对关键声明进行交叉验证，输出置信度分数（0.0–1.0）
 - 🔄 **迭代改进**：强制执行最少 2 轮、最多 5 轮质量改进循环
@@ -75,7 +75,7 @@
 |--------|------|
 | 🗣️ **Clarifier**（澄清者） | 识别用户意图，判断是否需要澄清，自动调整研究方向与深度 |
 | 📋 **Planner**（规划师） | 将问题分解为 10–16 个多语言搜索查询，按时效与领域分层排列 |
-| 🔍 **Researcher**（研究员） | 执行 DuckDuckGo 网络搜索，抓取网页正文，聚合多源原始数据 |
+| 🔍 **Researcher**（研究员） | 执行网络搜索（智谱 Search API，降级备选 DuckDuckGo），抓取网页正文，聚合多源原始数据 |
 | 🔎 **SourceVerifier**（来源验证员） | 评估信息来源的权威性（学术/政府/新闻/博客），打 Tier 1–4 标签 |
 | 🧐 **Analyst**（分析师） | 整合原始资料，提炼关键发现，进行因果、趋势、对比分析 |
 | ✍️ **Writer**（写作者） | 撰写结构化研究报告，根据评审反馈多轮迭代优化 |
@@ -306,7 +306,7 @@ Cat-Research 兼容所有 OpenAI 接口标准的 API 服务：
 
 Unlike simple AI Q&A tools, Cat-Research will:
 
-- 🔍 **Actively search** for the latest web information (recency-first)
+- 🔍 **Actively search** via Zhipu Search API with automatic recency filtering (prioritizes last 3 months)
 - 🔗 **Verify sources** using a 7-tier authority scoring system (Tier 1–4)
 - ✅ **Fact-check** key claims through cross-reference validation (confidence: 0.0–1.0)
 - 🔄 **Iteratively improve** with a minimum of 2 and up to 5 quality cycles
@@ -349,7 +349,7 @@ Final Report (09_final.md) + Confidence Report (10_confidence_report.json)
 |-------|------|
 | 🗣️ **Clarifier** | Identifies user intent, decides if clarification is needed, adjusts scope |
 | 📋 **Planner** | Breaks down the question into 10–16 multilingual queries, layered by recency |
-| 🔍 **Researcher** | Executes DuckDuckGo searches, scrapes pages, aggregates raw multi-source data |
+| 🔍 **Researcher** | Executes web searches (Zhipu Search API, falls back to DuckDuckGo), scrapes pages, aggregates raw multi-source data |
 | 🔎 **SourceVerifier** | Scores source authority (academic / government / news / blog) with Tier 1–4 labels |
 | 🧐 **Analyst** | Synthesizes research into key findings; causal, trend, and comparative analysis |
 | ✍️ **Writer** | Writes structured research reports; iterates based on review feedback |
