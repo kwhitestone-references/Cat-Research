@@ -310,10 +310,10 @@ Cat-Research 兼容所有 OpenAI 接口标准的 API 服务：
 | 提供商 | Base URL | 推荐模型 |
 |--------|----------|----------|
 | 智谱 AI | `https://open.bigmodel.cn/api/paas/v4/` | glm-4.7, glm-4.7-flash |
-| OpenAI | `https://api.openai.com/v1` | gpt-4o, gpt-4o-mini |
-| DeepSeek | `https://api.deepseek.com/v1` | deepseek-chat, deepseek-reasoner |
-| Moonshot | `https://api.moonshot.cn/v1` | moonshot-v1-32k |
-| 本地 Ollama | `http://localhost:11434/v1` | qwen2.5, llama3 等 |
+| OpenAI | `https://api.openai.com/v1` | gpt-5 |
+| DeepSeek | `https://api.deepseek.com/v1` | deepseek|
+| Moonshot | `https://api.moonshot.cn/v1` | moonshot 2.5 |
+| 本地 Ollama | `http://localhost:11434/v1` | qwen3.5 等 |
 
 ---
 
@@ -546,10 +546,10 @@ Cat-Research works with any OpenAI-compatible API:
 | Provider | Base URL | Recommended Models |
 |----------|----------|--------------------|
 | Zhipu AI | `https://open.bigmodel.cn/api/paas/v4/` | glm-4.7, glm-4.7-flash |
-| OpenAI | `https://api.openai.com/v1` | gpt-4o, gpt-4o-mini |
-| DeepSeek | `https://api.deepseek.com/v1` | deepseek-chat |
-| Moonshot | `https://api.moonshot.cn/v1` | moonshot-v1-32k |
-| Local (Ollama) | `http://localhost:11434/v1` | qwen2.5, llama3, etc. |
+| OpenAI | `https://api.openai.com/v1` | gpt-5 |
+| DeepSeek | `https://api.deepseek.com/v1` | deepseek |
+| Moonshot | `https://api.moonshot.cn/v1` | moonshot-2.5 |
+| Local (Ollama) | `http://localhost:11434/v1` | qwen3.5, etc. |
 
 ---
 
