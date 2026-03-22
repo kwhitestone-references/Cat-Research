@@ -8,7 +8,6 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
 [![OpenAI Compatible](https://img.shields.io/badge/API-OpenAI%20Compatible-412991?style=flat-square&logo=openai&logoColor=white)](https://platform.openai.com)
-[![Anthropic](https://img.shields.io/badge/Powered%20by-Anthropic-CC785C?style=flat-square)](https://anthropic.com)
 
 [中文](#-中文文档) · [English](#-english-documentation)
 
@@ -20,15 +19,15 @@
 
 ### 项目简介
 
-**Cat-Research** 是一个基于多智能体协作的深度研究系统。它将一个研究问题自动分解为 9 个专业阶段，由职责各异的 AI 智能体协同完成，最终交付一份经过来源权威性验证、事实交叉核查、结论逻辑验证的高质量研究报告。
+**Cat-Research** 是一个基于多智能体协作的深度研究系统。它将一个研究问题自动分解为多个专业阶段，由职责各异的 AI 智能体协同完成，最终交付一份经过来源权威性验证、事实交叉核查、结论逻辑验证的高质量研究报告。
 
 不同于普通的 AI 问答，Cat-Research 会：
 
 - 🔍 **主动搜索**：通过智谱 Search API 实时获取最新网络信息，自动按时效过滤（优先近 3 个月）
-- 🔗 **验证来源**：7 级权威性评分体系（Tier 1–4）
+- 🔗 **验证来源**：4 级 Tier 分类 + 0–100 分域名评分 + 4 档置信度等级
 - ✅ **核查事实**：对关键声明进行交叉验证，输出置信度分数（0.0–1.0）
-- 🔄 **迭代改进**：强制执行最少 2 轮、最多 5 轮质量改进循环
-- 📊 **置信度报告**：最终输出综合质量评分与可信度分析
+- 🔄 **迭代改进**：强制执行最少 2 轮、最多 5 轮质量改进循环，配合棘轮机制保留最优版本
+- 📊 **置信度报告**：最终输出综合质量评分（来源 25% + 事实 35% + 结论 40%）
 
 ---
 
@@ -43,28 +42,28 @@
 │                   （研究协调器）                     │
 └─────────────────────────────────────────────────────┘
    │
-   ├─→ [阶段 1] 🗣️  Clarifier          意图识别与问题澄清
+   ├─→ [阶段 1]   🗣️  Clarifier          意图识别与问题澄清
    │
-   ├─→ [阶段 2] 📋  Planner            研究规划（生成 10–16 个多语言搜索查询）
+   ├─→ [阶段 2]   📋  Planner            研究规划（生成 10–16 个多语言搜索查询）
    │
-   ├─→ [阶段 3] 🔍  Researcher         网络搜索 + 网页抓取 + 多源收集
+   ├─→ [阶段 3]   🔍  Researcher         网络搜索 + 网页抓取 + 多源收集
    │
-   ├─→ [阶段 3.5] 🔎 SourceVerifier   来源权威性评估（Tier 1–4 标注）
+   ├─→ [阶段 3.5] 🔎  SourceVerifier     来源权威性评估（Tier 1–4 + 0–100 分）
    │
-   ├─→ [阶段 4] 🧐  Analyst            综合分析（因果 / 趋势 / 对比）
+   ├─→ [阶段 4]   🧐  Analyst            综合分析（因果 / 趋势 / 对比）
    │
-   ├─→ [阶段 5] ✍️  Writer             初稿撰写（结构化研究报告）
+   ├─→ [阶段 5]   ✍️  Writer             初稿撰写（结构化研究报告）
    │
-   ├─→ [阶段 5.5] 🔬 FactChecker      事实核查（关键声明交叉验证）
+   ├─→ [阶段 5.5] 🔬  FactChecker        事实核查（关键声明交叉验证）
    │
-   └─→ [阶段 6] 🔄  质量改进循环（强制 ≥ 2 轮，最多 5 轮）
+   └─→ [阶段 6]   🔄  质量改进循环（强制 ≥ 2 轮，最多 5 轮）
            ├─→ 🎯 Critic              多维评审（7 项评分，满分 10）
            ├─→ 🔍 Researcher          补充研究（仅前 3 轮）
            ├─→ ✔️ ConclusionValidator  结论验证（5 项评分）
-           └─→ ✍️ Writer              迭代改进
+           └─→ ✍️ Writer              迭代改进（棘轮机制保留最优版本）
    │
    ▼
-最终研究报告（09_final.md）+ 置信度报告（10_confidence_report.json）
+最终研究报告（09_final.md）+ 置信度报告（08_verification/confidence_report.json）
 ```
 
 ---
@@ -76,7 +75,7 @@
 | 🗣️ **Clarifier**（澄清者） | 识别用户意图，判断是否需要澄清，自动调整研究方向与深度 |
 | 📋 **Planner**（规划师） | 将问题分解为 10–16 个多语言搜索查询，按时效与领域分层排列 |
 | 🔍 **Researcher**（研究员） | 执行网络搜索（智谱 Search API，降级备选 DuckDuckGo），抓取网页正文，聚合多源原始数据 |
-| 🔎 **SourceVerifier**（来源验证员） | 评估信息来源的权威性（学术/政府/新闻/博客），打 Tier 1–4 标签 |
+| 🔎 **SourceVerifier**（来源验证员） | 对每个来源打 Tier 1–4 标签并给出 0–100 分域名评分，识别不可靠来源 |
 | 🧐 **Analyst**（分析师） | 整合原始资料，提炼关键发现，进行因果、趋势、对比分析 |
 | ✍️ **Writer**（写作者） | 撰写结构化研究报告，根据评审反馈多轮迭代优化 |
 | 🎯 **Critic**（评审员） | 从完整性、准确性、深度、清晰性等 7 个维度对报告打分 |
@@ -109,17 +108,16 @@ cat-research/
 │   └── conclusion_validator.py  # 结论验证员
 │
 ├── api/                     # FastAPI Web 服务
-│   ├── app.py               # FastAPI 应用初始化
-│   ├── routes/              # API 路由（研究 / 配置 / 会话）
-│   ├── services/            # 业务逻辑层
-│   └── models/              # Pydantic 数据模型
+│   ├── app.py               # FastAPI 应用 + 所有路由定义
+│   ├── models/              # Pydantic 数据模型
+│   └── services/            # 业务逻辑层
 │
 ├── tools/                   # 工具模块
-│   ├── web_search.py        # DuckDuckGo 搜索 + 网页抓取
+│   ├── web_search.py        # 智谱 Web Search API + 网页抓取（降级 DuckDuckGo）
 │   ├── fact_tools.py        # 事实核查工具
 │   ├── file_tools.py        # 文件读写工具
 │   ├── domain_checker.py    # 域名权威性检测
-│   └── verification_registry.py  # 验证结果注册中心
+│   └── verification_registry.py  # 验证结果缓存注册中心
 │
 ├── static/                  # Web UI 前端静态文件
 └── workspace/               # 研究输出目录（每次研究独立文件夹）
@@ -208,12 +206,12 @@ workspace/session_20250322_143022/
 ├── 05_analysis.md               # 综合分析报告
 ├── 06_drafts/                   # 各轮草稿历史
 ├── 07_reviews/                  # 评审记录（含 7 维度分数）
-├── 08_verification/             # 验证结果
-│   ├── source_verification.json         # 来源权威性评估
-│   ├── fact_check_cycle_0.json          # 事实核查结果
-│   └── conclusion_validation_cycle_N.json  # 各轮结论验证
-├── 09_final.md                  # 📄 最终研究报告
-└── 10_confidence_report.json    # 📊 综合置信度报告
+├── 08_verification/             # 所有验证结果
+│   ├── source_verification.json    # 来源权威性评估
+│   ├── fact_check.json             # 事实核查结果
+│   ├── conclusion_validation.json  # 结论验证结果
+│   └── confidence_report.json      # 📊 综合置信度报告
+└── 09_final.md                  # 📄 最终研究报告
 ```
 
 ---
@@ -222,19 +220,49 @@ workspace/session_20250322_143022/
 
 启动 `python run_api.py` 后可访问以下接口：
 
+**研究任务**
+
 | 方法 | 端点 | 说明 |
 |------|------|------|
+| `POST` | `/api/research` | 启动研究任务 |
+| `GET` | `/api/research/{id}/stream` | SSE 流式获取实时进度 |
+| `GET` | `/api/research/{id}/status` | 查询任务当前状态 |
+| `GET` | `/api/research/{id}/result` | 获取已完成任务的结果 |
+| `POST` | `/api/research/{id}/message` | 向正在运行的任务注入消息 |
+| `POST` | `/api/research/{id}/pause` | 暂停任务 |
+| `POST` | `/api/research/{id}/resume` | 恢复任务 |
+| `POST` | `/api/research/{id}/stop` | 停止任务 |
+| `DELETE` | `/api/research/{id}` | 停止并删除任务 |
+
+**会话管理**
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `GET` | `/api/sessions` | 获取历史研究会话列表 |
+| `GET` | `/api/sessions/{id}/report` | 获取会话最终报告 |
+| `GET` | `/api/sessions/{id}/plan` | 获取会话研究计划 |
+| `GET` | `/api/sessions/{id}/phases` | 获取会话各阶段内容 |
+| `DELETE` | `/api/sessions/{id}` | 删除会话及工作区 |
+
+**澄清对话**
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `POST` | `/api/clarify` | 开始意图澄清会话 |
+| `POST` | `/api/clarify/{id}/message` | 继续澄清对话 |
+| `POST` | `/api/clarify/{id}/confirm` | 确认问题并启动研究 |
+
+**系统**
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| `GET` | `/api/health` | 健康检查 |
+| `GET` | `/api/config` | 获取当前系统配置 |
+| `POST` | `/api/config` | 运行时更新系统配置 |
+| `GET` | `/api/settings` | 获取当前 API 设置 |
+| `POST` | `/api/settings` | 更新并持久化 API Key / 模型配置 |
 | `GET` | `/` | Web UI 界面 |
 | `GET` | `/docs` | Swagger 交互式 API 文档 |
-| `POST` | `/api/clarify/start` | 开始意图澄清对话 |
-| `POST` | `/api/clarify/message` | 发送澄清消息 |
-| `POST` | `/api/clarify/confirm` | 确认问题并启动研究 |
-| `POST` | `/api/research/start` | 启动研究任务（SSE 流式返回进度） |
-| `GET` | `/api/research/status/{id}` | 查询研究任务状态 |
-| `POST` | `/api/research/stop/{id}` | 停止指定研究任务 |
-| `GET` | `/api/sessions` | 获取历史研究会话列表 |
-| `GET` | `/api/config` | 获取当前系统配置 |
-| `POST` | `/api/settings` | 更新 API Key / 模型配置 |
 
 ---
 
@@ -302,15 +330,15 @@ Cat-Research 兼容所有 OpenAI 接口标准的 API 服务：
 
 ### Overview
 
-**Cat-Research** is a multi-agent collaborative deep research system. It automatically decomposes a research question into 9 specialized stages, each handled by a dedicated AI agent, ultimately producing a high-quality research report with source credibility verification, cross-referenced fact-checking, and validated conclusions.
+**Cat-Research** is a multi-agent collaborative deep research system. It automatically decomposes a research question into specialized stages, each handled by a dedicated AI agent, ultimately producing a high-quality research report with source credibility verification, cross-referenced fact-checking, and validated conclusions.
 
 Unlike simple AI Q&A tools, Cat-Research will:
 
 - 🔍 **Actively search** via Zhipu Search API with automatic recency filtering (prioritizes last 3 months)
-- 🔗 **Verify sources** using a 7-tier authority scoring system (Tier 1–4)
+- 🔗 **Verify sources** using 4-tier classification + 0–100 domain scoring + 4-level confidence rating
 - ✅ **Fact-check** key claims through cross-reference validation (confidence: 0.0–1.0)
-- 🔄 **Iteratively improve** with a minimum of 2 and up to 5 quality cycles
-- 📊 **Output a confidence report** with comprehensive quality scoring
+- 🔄 **Iteratively improve** with a minimum of 2 and up to 5 quality cycles, with a ratchet mechanism to preserve the best version
+- 📊 **Output a confidence report** with weighted quality scoring (sources 25% + facts 35% + conclusions 40%)
 
 ---
 
@@ -327,7 +355,7 @@ User Query
    ├─→ [Stage 1]   🗣️  Clarifier          Intent recognition & clarification
    ├─→ [Stage 2]   📋  Planner            Research planning (10–16 queries)
    ├─→ [Stage 3]   🔍  Researcher         Web search + page scraping
-   ├─→ [Stage 3.5] 🔎  SourceVerifier     Source authority verification (Tier 1–4)
+   ├─→ [Stage 3.5] 🔎  SourceVerifier     Source authority scoring (Tier 1–4, 0–100)
    ├─→ [Stage 4]   🧐  Analyst            Synthesis & causal/trend analysis
    ├─→ [Stage 5]   ✍️  Writer             First draft (structured report)
    ├─→ [Stage 5.5] 🔬  FactChecker        Fact verification (0.0–1.0 confidence)
@@ -335,10 +363,10 @@ User Query
            ├─→ 🎯 Critic              Multi-dimension review (7 scores / 10)
            ├─→ 🔍 Researcher          Supplemental research (rounds 1–3)
            ├─→ ✔️ ConclusionValidator  Conclusion validation (5 scores)
-           └─→ ✍️ Writer              Iterative improvement
+           └─→ ✍️ Writer              Iterative improvement (ratchet to best version)
    │
    ▼
-Final Report (09_final.md) + Confidence Report (10_confidence_report.json)
+Final Report (09_final.md) + Confidence Report (08_verification/confidence_report.json)
 ```
 
 ---
@@ -350,12 +378,12 @@ Final Report (09_final.md) + Confidence Report (10_confidence_report.json)
 | 🗣️ **Clarifier** | Identifies user intent, decides if clarification is needed, adjusts scope |
 | 📋 **Planner** | Breaks down the question into 10–16 multilingual queries, layered by recency |
 | 🔍 **Researcher** | Executes web searches (Zhipu Search API, falls back to DuckDuckGo), scrapes pages, aggregates raw multi-source data |
-| 🔎 **SourceVerifier** | Scores source authority (academic / government / news / blog) with Tier 1–4 labels |
+| 🔎 **SourceVerifier** | Assigns Tier 1–4 labels and 0–100 domain scores to each source; flags unreliable ones |
 | 🧐 **Analyst** | Synthesizes research into key findings; causal, trend, and comparative analysis |
 | ✍️ **Writer** | Writes structured research reports; iterates based on review feedback |
-| 🎯 **Critic** | Reviews on 7 dimensions: completeness, accuracy, depth, clarity, citations, etc. |
+| 🎯 **Critic** | Reviews on 7 dimensions: completeness, accuracy, depth, clarity, usefulness, sources, simplicity |
 | 🔬 **FactChecker** | Cross-validates key claims and assigns confidence scores (0.0–1.0) |
-| ✔️ **ConclusionValidator** | Validates logical rigor, completeness, and practical value of conclusions |
+| ✔️ **ConclusionValidator** | Validates logical rigor, completeness, and practical value of conclusions (5 scores) |
 
 ---
 
@@ -425,12 +453,12 @@ workspace/session_20250322_143022/
 ├── 05_analysis.md               # Synthesized analysis
 ├── 06_drafts/                   # Draft history
 ├── 07_reviews/                  # Review records (with 7-dim scores)
-├── 08_verification/             # Verification results
-│   ├── source_verification.json
-│   ├── fact_check_cycle_0.json
-│   └── conclusion_validation_cycle_N.json
-├── 09_final.md                  # 📄 Final research report
-└── 10_confidence_report.json    # 📊 Confidence report
+├── 08_verification/             # All verification results
+│   ├── source_verification.json    # Source authority scores
+│   ├── fact_check.json             # Fact-check results
+│   ├── conclusion_validation.json  # Conclusion validation
+│   └── confidence_report.json      # 📊 Confidence report
+└── 09_final.md                  # 📄 Final research report
 ```
 
 ---
@@ -439,19 +467,49 @@ workspace/session_20250322_143022/
 
 After running `python run_api.py`:
 
+**Research Tasks**
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `POST` | `/api/research` | Start a new research task |
+| `GET` | `/api/research/{id}/stream` | SSE stream for real-time progress |
+| `GET` | `/api/research/{id}/status` | Get current task status |
+| `GET` | `/api/research/{id}/result` | Get completed task result |
+| `POST` | `/api/research/{id}/message` | Inject a message into a running task |
+| `POST` | `/api/research/{id}/pause` | Pause a task |
+| `POST` | `/api/research/{id}/resume` | Resume a paused task |
+| `POST` | `/api/research/{id}/stop` | Stop a task |
+| `DELETE` | `/api/research/{id}` | Stop and delete a task |
+
+**Sessions**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/sessions` | List all research sessions |
+| `GET` | `/api/sessions/{id}/report` | Get session final report |
+| `GET` | `/api/sessions/{id}/plan` | Get session research plan |
+| `GET` | `/api/sessions/{id}/phases` | Get all phase outputs for a session |
+| `DELETE` | `/api/sessions/{id}` | Delete session and workspace |
+
+**Clarification**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/clarify` | Start a clarification session |
+| `POST` | `/api/clarify/{id}/message` | Continue clarification dialog |
+| `POST` | `/api/clarify/{id}/confirm` | Confirm and start research |
+
+**System**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/health` | Health check |
+| `GET` | `/api/config` | Get system configuration |
+| `POST` | `/api/config` | Update configuration at runtime |
+| `GET` | `/api/settings` | Get current API settings |
+| `POST` | `/api/settings` | Update and persist API key / model settings |
 | `GET` | `/` | Web UI |
 | `GET` | `/docs` | Swagger interactive API docs |
-| `POST` | `/api/clarify/start` | Start clarification dialog |
-| `POST` | `/api/clarify/message` | Send clarification message |
-| `POST` | `/api/clarify/confirm` | Confirm and begin research |
-| `POST` | `/api/research/start` | Start research task (SSE streaming) |
-| `GET` | `/api/research/status/{id}` | Query task status |
-| `POST` | `/api/research/stop/{id}` | Stop a task |
-| `GET` | `/api/sessions` | List research history |
-| `GET` | `/api/config` | Get current configuration |
-| `POST` | `/api/settings` | Update API key / model settings |
 
 ---
 
