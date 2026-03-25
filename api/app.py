@@ -6,6 +6,7 @@ import os
 import json
 import asyncio
 import threading
+import time
 import uuid
 from datetime import datetime
 from typing import Optional, AsyncGenerator
@@ -53,6 +54,14 @@ class ResearchRequest(BaseModel):
     question: str
     clarification: Optional[str] = None  # 预填写的澄清信息
     research_strategy: Optional[str] = None  # 研究策略（搜索方向、来源类型等）
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    core_model: Optional[str] = None
+    support_model: Optional[str] = None
+    min_cycles: Optional[int] = None
+    max_cycles: Optional[int] = None
+    quality_threshold: Optional[float] = None
+    timeout_sec: Optional[int] = None  # 单次任务超时时间（秒）
 
 
 class ConfigRequest(BaseModel):
@@ -105,6 +114,10 @@ _task_pause_events: dict[str, threading.Event] = {}
 _task_stop_events: dict[str, threading.Event] = {}
 
 _MAX_RECENT_EVENTS = 8
+try:
+    _STATUS_IDLE_TIMEOUT_SEC = max(0, int(os.getenv("STATUS_IDLE_TIMEOUT_SEC", "300")))
+except ValueError:
+    _STATUS_IDLE_TIMEOUT_SEC = 300
 _PHASE_PROGRESS = {
     1.0: 0.08,
     2.0: 0.18,
@@ -126,6 +139,15 @@ def _running_task_count() -> int:
 
 def _get_task_status(task_id: str) -> dict:
     return _task_status.get(task_id, {"status": "not_found"})
+
+
+def _touch_task_observation(task_id: str):
+    status = _task_status.get(task_id)
+    if not status:
+        return
+    now = time.time()
+    status["last_observed_ts"] = now
+    status["last_observed_at"] = datetime.fromtimestamp(now).isoformat()
 
 
 def _clamp_progress(value: float) -> float:
@@ -268,9 +290,146 @@ def _heartbeat_thread(task_id: str, stop_ev):
         })
 
 
+def _status_idle_watchdog(task_id: str, idle_timeout_sec: int, stop_ev, pause_ev):
+    """超过指定时间无人查询状态或订阅进度时，自动停止任务。"""
+    if idle_timeout_sec <= 0:
+        return
+
+    while not stop_ev.is_set():
+        stop_ev.wait(timeout=min(5.0, idle_timeout_sec))
+        if stop_ev.is_set():
+            return
+
+        status = _task_status.get(task_id)
+        if not status:
+            return
+        if status.get("status") not in ("pending", "running"):
+            return
+
+        last_observed = float(
+            status.get("last_observed_ts")
+            or status.get("_start_ts")
+            or time.time()
+        )
+        if time.time() - last_observed < idle_timeout_sec:
+            continue
+
+        status["idle_timeout_triggered"] = True
+        status["status"] = "stopped"
+        status["current_status"] = "stopped"
+        status["message"] = f"超过{idle_timeout_sec}秒未查询状态，任务已自动停止"
+        _set_task_progress(task_id, 1.0, force=True)
+        _put_event(task_id, "error", {"message": status["message"]})
+        _record_task_event(task_id, "error", {"message": status["message"]})
+        if pause_ev:
+            pause_ev.set()
+        stop_ev.set()
+        return
+
+
+def _timeout_watchdog(task_id: str, timeout_sec: int, stop_ev, pause_ev):
+    """到达单次任务超时后，请求任务停止并标记失败。"""
+    if timeout_sec <= 0:
+        return
+    deadline = time.time() + timeout_sec
+    while not stop_ev.is_set():
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            status = _task_status.get(task_id)
+            if not status:
+                return
+            if status.get("status") not in ("pending", "running"):
+                return
+            status["timeout_triggered"] = True
+            status["status"] = "failed"
+            status["current_status"] = "timeout"
+            status["message"] = f"任务执行超时（>{timeout_sec}s），正在停止..."
+            _put_event(task_id, "error", {"message": status["message"]})
+            _record_task_event(task_id, "error", {"message": status["message"]})
+            if pause_ev:
+                pause_ev.set()
+            stop_ev.set()
+            return
+        stop_ev.wait(timeout=min(1.0, max(0.1, remaining)))
+
+
+def _build_task_runtime_config(task_status: dict) -> dict:
+    import config
+
+    return {
+        "api_key": task_status.get("api_key") or config.API_KEY,
+        "base_url": task_status.get("base_url") or config.API_BASE_URL,
+        "core_model": task_status.get("core_model") or config.CORE_MODEL,
+        "support_model": task_status.get("support_model") or config.SUPPORT_MODEL,
+        "min_cycles": task_status.get("min_cycles") or config.MIN_IMPROVEMENT_CYCLES,
+        "max_cycles": task_status.get("max_cycles") or config.MAX_IMPROVEMENT_CYCLES,
+        "quality_threshold": task_status.get("quality_threshold"),
+    }
+
+
+def _apply_task_runtime_config(task_config: dict):
+    import config
+    from agents import planner, researcher, analyst, writer, critic, source_verifier, fact_checker, conclusion_validator
+    import orchestrator as orchestrator_module
+
+    api_key = (task_config.get("api_key") or "").strip()
+    if api_key:
+        config.API_KEY = api_key
+        config.ZHIPU_API_KEY = api_key
+        config.ANTHROPIC_API_KEY = api_key
+
+    base_url = (task_config.get("base_url") or "").strip()
+    if base_url:
+        normalized = config.normalize_openai_base_url(base_url)
+        config.API_BASE_URL = normalized
+        config.ZHIPU_BASE_URL = normalized
+
+    core_model = (task_config.get("core_model") or "").strip()
+    if core_model:
+        config.CORE_MODEL = core_model
+        config.ORCHESTRATOR_MODEL = core_model
+        config.PLANNER_MODEL = core_model
+        config.RESEARCHER_MODEL = core_model
+        config.ANALYST_MODEL = core_model
+        config.WRITER_MODEL = core_model
+        orchestrator_module.ORCHESTRATOR_MODEL = core_model
+        planner.PLANNER_MODEL = core_model
+        researcher.RESEARCHER_MODEL = core_model
+        analyst.ANALYST_MODEL = core_model
+        writer.WRITER_MODEL = core_model
+
+    support_model = (task_config.get("support_model") or "").strip()
+    if support_model:
+        config.SUPPORT_MODEL = support_model
+        config.CRITIC_MODEL = support_model
+        config.SOURCE_VERIFIER_MODEL = support_model
+        config.FACT_CHECKER_MODEL = support_model
+        config.CONCLUSION_VALIDATOR_MODEL = support_model
+        critic.CRITIC_MODEL = support_model
+        source_verifier.SOURCE_VERIFIER_MODEL = support_model
+        fact_checker.FACT_CHECKER_MODEL = support_model
+        conclusion_validator.CONCLUSION_VALIDATOR_MODEL = support_model
+
+    min_cycles = task_config.get("min_cycles")
+    if min_cycles is not None:
+        config.MIN_IMPROVEMENT_CYCLES = int(min_cycles)
+        orchestrator_module.MIN_IMPROVEMENT_CYCLES = int(min_cycles)
+
+    max_cycles = task_config.get("max_cycles")
+    if max_cycles is not None:
+        config.MAX_IMPROVEMENT_CYCLES = int(max_cycles)
+        orchestrator_module.MAX_IMPROVEMENT_CYCLES = int(max_cycles)
+
+    quality_threshold = task_config.get("quality_threshold")
+    if quality_threshold is not None:
+        config.QUALITY_THRESHOLD = float(quality_threshold)
+        orchestrator_module.QUALITY_THRESHOLD = float(quality_threshold)
+
+
 def _run_research_task(task_id: str, question: str, clarification: Optional[str],
                        research_strategy: Optional[str] = None,
-                       intent_meta: Optional[dict] = None):
+                       intent_meta: Optional[dict] = None,
+                       timeout_sec: Optional[int] = None):
     """在后台线程中运行研究任务"""
     import sys, time as _time
     sys.path.insert(0, ROOT_DIR)
@@ -288,6 +447,30 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
         hb_stop = _task_stop_events.get(task_id) or threading.Event()
         hb_thread = threading.Thread(target=_heartbeat_thread, args=(task_id, hb_stop), daemon=True)
         hb_thread.start()
+
+        task_config = _build_task_runtime_config(_task_status[task_id])
+        if not task_config.get("api_key"):
+            raise RuntimeError("未提供 API Key，无法启动研究任务")
+        _apply_task_runtime_config(task_config)
+
+        # 启动单任务超时守护线程
+        effective_timeout = int(timeout_sec or 0)
+        pause_event = _task_pause_events.get(task_id)
+        stop_event = _task_stop_events.get(task_id)
+        if effective_timeout > 0:
+            watchdog_thread = threading.Thread(
+                target=_timeout_watchdog,
+                args=(task_id, effective_timeout, hb_stop, pause_event),
+                daemon=True,
+            )
+            watchdog_thread.start()
+
+        idle_watchdog_thread = threading.Thread(
+            target=_status_idle_watchdog,
+            args=(task_id, _STATUS_IDLE_TIMEOUT_SEC, hb_stop, pause_event),
+            daemon=True,
+        )
+        idle_watchdog_thread.start()
 
         # 如果有预填写的澄清信息，合并到问题中
         full_question = question
@@ -343,8 +526,6 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
             except Exception:
                 pass  # 回调失败不中断主流程
 
-        pause_event = _task_pause_events.get(task_id)
-        stop_event = _task_stop_events.get(task_id)
         orchestrator = ResearchOrchestrator(progress_callback=progress_callback)
         _task_orchestrators[task_id] = orchestrator
 
@@ -363,11 +544,19 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
         interrupted = (stop_event is not None and stop_event.is_set()) or result == "任务已中断"
         if interrupted:
             final_status = _task_status[task_id].get("status")
-            if final_status not in ("deleted", "stopped"):
+            if _task_status[task_id].get("timeout_triggered"):
+                final_status = "failed"
+                _task_status[task_id]["message"] = f"任务执行超时（>{effective_timeout}s）"
+                _task_status[task_id]["error"] = _task_status[task_id]["message"]
+            elif _task_status[task_id].get("idle_timeout_triggered"):
+                final_status = "stopped"
+                _task_status[task_id]["error"] = _task_status[task_id].get("message", "任务已自动停止")
+            elif final_status not in ("deleted", "stopped"):
                 final_status = "stopped"
             _task_status[task_id]["status"] = final_status
             _task_status[task_id]["current_status"] = final_status
-            _task_status[task_id]["message"] = "任务已停止"
+            if final_status == "stopped" and not _task_status[task_id].get("idle_timeout_triggered"):
+                _task_status[task_id]["message"] = "任务已停止"
             _set_task_progress(task_id, 1.0, force=True)
             _task_status[task_id]["workspace"] = str(orchestrator.workspace)
             _task_status[task_id]["session_id"] = orchestrator.session_id
@@ -468,17 +657,26 @@ async def start_research(request: ResearchRequest):
     _task_status[task_id] = {
         "task_id": task_id,
         "question": request.question,
+        "api_key": request.api_key,
+        "base_url": request.base_url,
+        "core_model": request.core_model,
+        "support_model": request.support_model,
+        "min_cycles": request.min_cycles,
+        "max_cycles": request.max_cycles,
+        "quality_threshold": request.quality_threshold,
         "status": "pending",
         "progress": 0.0,
         "created_at": datetime.now().isoformat(),
+        "last_observed_ts": time.time(),
         "scores": [],
-        "current_cycle": 0
+        "current_cycle": 0,
+        "timeout_sec": request.timeout_sec,
     }
 
     # 在后台线程中运行
     thread = threading.Thread(
         target=_run_research_task,
-        args=(task_id, request.question, request.clarification, request.research_strategy),
+        args=(task_id, request.question, request.clarification, request.research_strategy, None, request.timeout_sec),
         daemon=True
     )
     thread.start()
@@ -501,6 +699,7 @@ async def stream_progress(task_id: str):
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        _touch_task_observation(task_id)
         # 心跳，保持连接
         yield f"data: {json.dumps({'type': 'ping', 'task_id': task_id})}\n\n"
 
@@ -511,6 +710,7 @@ async def stream_progress(task_id: str):
             # 非阻塞读取队列（100ms 超时）
             try:
                 await asyncio.sleep(0.1)
+                _touch_task_observation(task_id)
                 while True:
                     try:
                         event = queue.get_nowait()
@@ -544,6 +744,7 @@ async def get_task_status(task_id: str):
     status = _get_task_status(task_id)
     if status.get("status") == "not_found":
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+    _touch_task_observation(task_id)
     return status
 
 
@@ -988,6 +1189,7 @@ async def confirm_clarify(clarify_id: str, request: ClarifyConfirmRequest):
         "status": "pending",
         "progress": 0.0,
         "created_at": datetime.now().isoformat(),
+        "last_observed_ts": time.time(),
         "scores": [],
         "current_cycle": 0,
         "clarify_id": clarify_id,

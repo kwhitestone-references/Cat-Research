@@ -284,6 +284,7 @@ SUPPORT_MODEL=glm-4.7-flash     # 辅助模型（评审/验证/核查）
 MAX_IMPROVEMENT_CYCLES=5        # 最多改进轮数（默认 5）
 MIN_IMPROVEMENT_CYCLES=2        # 最少强制改进轮数（默认 2）
 QUALITY_THRESHOLD=8.0           # 质量提前停止阈值（满分 10）
+STATUS_IDLE_TIMEOUT_SEC=300     # 超过多少秒无人查询 status/stream 就自动停止任务
 MAX_SEARCH_RESULTS=8            # 每次搜索最多返回结果数
 MAX_FETCH_CHARS=6000            # 每个网页最多提取字符数
 
@@ -531,6 +532,7 @@ SUPPORT_MODEL=glm-4.7-flash     # Support model (review / verification)
 MAX_IMPROVEMENT_CYCLES=5        # Maximum improvement rounds
 MIN_IMPROVEMENT_CYCLES=2        # Minimum forced improvement rounds
 QUALITY_THRESHOLD=8.0           # Early-stop quality threshold (out of 10)
+STATUS_IDLE_TIMEOUT_SEC=300     # Auto-stop if status/stream is not observed for this many seconds
 
 # API server
 API_HOST=0.0.0.0
