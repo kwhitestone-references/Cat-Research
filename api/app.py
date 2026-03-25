@@ -360,6 +360,19 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
                                       intent_meta=intent_meta,
                                       pause_event=pause_event, stop_event=stop_event)
 
+        interrupted = (stop_event is not None and stop_event.is_set()) or result == "任务已中断"
+        if interrupted:
+            final_status = _task_status[task_id].get("status")
+            if final_status not in ("deleted", "stopped"):
+                final_status = "stopped"
+            _task_status[task_id]["status"] = final_status
+            _task_status[task_id]["current_status"] = final_status
+            _task_status[task_id]["message"] = "任务已停止"
+            _set_task_progress(task_id, 1.0, force=True)
+            _task_status[task_id]["workspace"] = str(orchestrator.workspace)
+            _task_status[task_id]["session_id"] = orchestrator.session_id
+            return
+
         _task_status[task_id]["status"] = "completed"
         _set_task_progress(task_id, 1.0, force=True)
         _task_status[task_id]["result"] = result
@@ -609,6 +622,9 @@ async def stop_task(task_id: str):
         pause_ev.set()
     if task_id in _task_status:
         _task_status[task_id]["status"] = "stopped"
+        _task_status[task_id]["current_status"] = "stopped"
+        _task_status[task_id]["message"] = "任务已被用户停止"
+        _set_task_progress(task_id, 1.0, force=True)
     _put_event(task_id, "error", {"message": "任务已被用户停止"})
     return {"status": "stopping"}
 

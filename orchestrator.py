@@ -207,7 +207,25 @@ class ResearchOrchestrator:
 
             # ── 等待子进程完成（带超时）──
             try:
-                proc.wait(timeout=timeout)
+                deadline = time.time() + timeout
+                while True:
+                    if self._stop_event and self._stop_event.is_set():
+                        print(f"  [子进程] {phase_name} 收到停止信号，发送终止信号", flush=True)
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                        _monitor_stop.set()
+                        monitor_thread.join(timeout=5)
+                        return {"status": "stopped", "error": f"{phase_name} 已停止"}
+
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired(proc.args, timeout)
+
+                    proc.wait(timeout=min(0.5, remaining))
+                    break
             except subprocess.TimeoutExpired:
                 print(f"  [子进程] {phase_name} 超时（{timeout}s），发送终止信号", flush=True)
                 proc.terminate()
@@ -265,10 +283,14 @@ class ResearchOrchestrator:
         if self._pause_event is not None and not self._pause_event.is_set():
             self._emit("paused", {"phase": phase_name})
             print(f"\n⏸️  任务已暂停（阶段：{phase_name}），等待恢复...", flush=True)
-            self._pause_event.wait(timeout=1800)  # 最多等30分钟
-            if not self._pause_event.is_set():
-                # 超时仍未恢复，当作停止
-                return None
+            pause_deadline = time.time() + 1800
+            while not self._pause_event.is_set():
+                if self._stop_event and self._stop_event.is_set():
+                    print(f"\n🛑 暂停期间收到停止信号（阶段：{phase_name}），立即终止", flush=True)
+                    return None
+                if time.time() >= pause_deadline:
+                    return None
+                self._pause_event.wait(timeout=0.5)
             self._emit("resumed", {"phase": phase_name})
             print(f"\n▶️  任务已恢复（阶段：{phase_name}）", flush=True)
 
