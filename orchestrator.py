@@ -338,13 +338,12 @@ class ResearchOrchestrator:
         print(f"\n{SEPARATOR}", flush=True)
         print("🧠 正在分析您的问题...", flush=True)
 
-        response = client.chat.completions.create(
-            model=ORCHESTRATOR_MODEL,
-            max_tokens=2048,
-            temperature=0.3,
-            top_p=0.85,
-            extra_body={"thinking": {"type": "enabled"}},
-            messages=[{
+        request_kwargs = {
+            "model": ORCHESTRATOR_MODEL,
+            "max_completion_tokens": 2048,
+            "temperature": 0.3,
+            "top_p": 0.85,
+            "messages": [{
                 "role": "user",
                 "content": f"""分析这个研究问题并生成2-3个澄清问题：
 
@@ -359,7 +358,11 @@ class ResearchOrchestrator:
 
 保持简洁，每项不超过2行。"""
             }]
-        )
+        }
+        if getattr(_config, "ENABLE_PROVIDER_THINKING", False):
+            request_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+
+        response = client.chat.completions.create(**request_kwargs)
 
         msg = response.choices[0].message if response.choices else None
         analysis = (msg.content or getattr(msg, "reasoning_content", "") or "") if msg else ""

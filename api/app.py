@@ -104,6 +104,20 @@ _task_pause_events: dict[str, threading.Event] = {}
 # 存储各任务的停止事件 {task_id: threading.Event}
 _task_stop_events: dict[str, threading.Event] = {}
 
+_MAX_RECENT_EVENTS = 8
+_PHASE_PROGRESS = {
+    1.0: 0.08,
+    2.0: 0.18,
+    3.0: 0.34,
+    3.5: 0.46,
+    4.0: 0.58,
+    5.0: 0.68,
+    6.0: 0.72,
+    7.0: 0.95,
+}
+_IMPROVEMENT_PROGRESS_BASE = 0.72
+_IMPROVEMENT_PROGRESS_SPAN = 0.20
+
 
 def _running_task_count() -> int:
     """返回当前正在运行的任务数量"""
@@ -114,6 +128,50 @@ def _get_task_status(task_id: str) -> dict:
     return _task_status.get(task_id, {"status": "not_found"})
 
 
+def _clamp_progress(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _set_task_progress(task_id: str, progress: float, *, force: bool = False):
+    status = _task_status.get(task_id)
+    if not status:
+        return
+    progress = _clamp_progress(progress)
+    current = float(status.get("progress", 0.0) or 0.0)
+    if force or progress > current:
+        status["progress"] = progress
+
+
+def _update_progress_from_phase(task_id: str, phase: object):
+    try:
+        phase_value = float(phase)
+    except (TypeError, ValueError):
+        return
+    progress = _PHASE_PROGRESS.get(phase_value)
+    if progress is not None:
+        _set_task_progress(task_id, progress)
+
+
+def _update_progress_from_cycle(task_id: str, cycle: object, max_cycles: object):
+    try:
+        cycle_value = int(cycle)
+    except (TypeError, ValueError):
+        return
+    try:
+        max_cycle_value = int(max_cycles)
+    except (TypeError, ValueError):
+        max_cycle_value = 0
+
+    if cycle_value <= 0:
+        return
+    if max_cycle_value <= 0:
+        max_cycle_value = max(cycle_value, 1)
+
+    cycle_fraction = min(cycle_value, max_cycle_value) / max_cycle_value
+    progress = _IMPROVEMENT_PROGRESS_BASE + (cycle_fraction * _IMPROVEMENT_PROGRESS_SPAN)
+    _set_task_progress(task_id, progress)
+
+
 def _put_event(task_id: str, event_type: str, data: dict):
     """向任务队列推送事件"""
     if task_id in _task_queues:
@@ -122,6 +180,75 @@ def _put_event(task_id: str, event_type: str, data: dict):
             "data": data,
             "timestamp": datetime.now().isoformat()
         })
+
+
+def _build_event_summary(event_type: str, data: dict) -> Optional[str]:
+    if event_type == "started":
+        question = (data or {}).get("question", "")
+        return f"任务开始：{question[:60]}" if question else "任务开始"
+    if event_type == "phase":
+        name = (data or {}).get("name", "")
+        return f"进入阶段：{name}" if name else None
+    if event_type == "status":
+        status_text = (data or {}).get("status", "")
+        return f"当前状态：{status_text}" if status_text else None
+    if event_type == "tool_call":
+        return (data or {}).get("message")
+    if event_type == "plan":
+        total_queries = len((data or {}).get("search_queries", []) or [])
+        total_aspects = len((data or {}).get("key_aspects", []) or [])
+        return f"研究规划完成：{total_aspects} 个维度，{total_queries} 个查询"
+    if event_type == "cycle_start":
+        cycle = (data or {}).get("cycle")
+        max_cycle = (data or {}).get("max")
+        if cycle and max_cycle:
+            return f"开始第 {cycle}/{max_cycle} 轮改进"
+    if event_type == "review":
+        avg_score = (data or {}).get("avg_score")
+        if avg_score is not None:
+            return f"评审完成：平均分 {avg_score}"
+    if event_type == "confidence_report":
+        return "置信度报告已生成"
+    if event_type == "paused":
+        phase = (data or {}).get("phase", "")
+        return f"任务已暂停（阶段：{phase}）" if phase else "任务已暂停"
+    if event_type == "resumed":
+        phase = (data or {}).get("phase", "")
+        return f"任务已恢复（阶段：{phase}）" if phase else "任务已恢复"
+    if event_type == "user_message_ack":
+        msgs = (data or {}).get("messages", []) or []
+        if msgs:
+            return f"收到用户补充：{'; '.join(str(m) for m in msgs)[:120]}"
+    if event_type == "completed":
+        return "研究任务完成"
+    if event_type == "error":
+        msg = (data or {}).get("message", "")
+        return msg or "任务执行失败"
+    return None
+
+
+def _record_task_event(task_id: str, event_type: str, data: dict):
+    status = _task_status.get(task_id)
+    if not status:
+        return
+
+    summary = _build_event_summary(event_type, data)
+    if not summary:
+        return
+
+    timestamp = datetime.now().isoformat()
+    recent_events = status.setdefault("recent_events", [])
+    recent_events.append({
+        "type": event_type,
+        "summary": summary,
+        "timestamp": timestamp,
+    })
+    if len(recent_events) > _MAX_RECENT_EVENTS:
+        del recent_events[:-_MAX_RECENT_EVENTS]
+
+    status["last_event"] = summary
+    if event_type != "error":
+        status["message"] = summary
 
 
 def _heartbeat_thread(task_id: str, stop_ev):
@@ -153,7 +280,9 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
     try:
         _task_status[task_id]["status"] = "running"
         _task_status[task_id]["_start_ts"] = _time.time()
+        _set_task_progress(task_id, 0.01, force=True)
         _put_event(task_id, "started", {"task_id": task_id, "question": question})
+        _record_task_event(task_id, "started", {"task_id": task_id, "question": question})
 
         # 启动心跳线程
         hb_stop = _task_stop_events.get(task_id) or threading.Event()
@@ -170,20 +299,33 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
         def progress_callback(event_type: str, data: dict):
             try:
                 _put_event(task_id, event_type, data)
+                _record_task_event(task_id, event_type, data)
                 # 同步更新状态
                 if event_type == "status":
                     _task_status[task_id]["current_status"] = data.get("status", "")
+                elif event_type == "phase":
+                    _task_status[task_id]["phase"] = data.get("name") or data.get("phase")
+                    if data.get("name"):
+                        _task_status[task_id]["current_status"] = data.get("name", "")
+                    _update_progress_from_phase(task_id, data.get("phase"))
                 elif event_type == "plan":
                     _task_status[task_id]["plan"] = data
                 elif event_type == "cycle_start":
                     _task_status[task_id]["current_cycle"] = data.get("cycle", 0)
+                    _task_status[task_id]["max_cycles"] = data.get("max", _task_status[task_id].get("max_cycles", 0))
+                    _update_progress_from_cycle(task_id, data.get("cycle"), data.get("max"))
                 elif event_type == "review":
                     scores = _task_status[task_id].get("scores", [])
                     scores.append(data.get("avg_score", 0))
                     _task_status[task_id]["scores"] = scores
+                    _update_progress_from_cycle(
+                        task_id,
+                        data.get("cycle", _task_status[task_id].get("current_cycle", 0)),
+                        _task_status[task_id].get("max_cycles", 0),
+                    )
                 elif event_type == "confidence_report":
                     _task_status[task_id]["confidence_report"] = data
-            elif event_type == "token_usage":
+                elif event_type == "token_usage":
                     usage = _task_status[task_id].setdefault("token_usage", {
                         "total_input_tokens": 0,
                         "total_output_tokens": 0,
@@ -219,6 +361,7 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
                                       pause_event=pause_event, stop_event=stop_event)
 
         _task_status[task_id]["status"] = "completed"
+        _set_task_progress(task_id, 1.0, force=True)
         _task_status[task_id]["result"] = result
         _task_status[task_id]["workspace"] = str(orchestrator.workspace)
         _task_status[task_id]["session_id"] = orchestrator.session_id
@@ -257,12 +400,18 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
             "session_id": orchestrator.session_id,
             "token_usage": token_usage
         })
+        _record_task_event(task_id, "completed", {
+            "workspace": str(orchestrator.workspace),
+            "session_id": orchestrator.session_id,
+        })
 
     except Exception as e:
         error_msg = str(e)
         _task_status[task_id]["status"] = "failed"
+        _set_task_progress(task_id, 1.0, force=True)
         _task_status[task_id]["error"] = error_msg
         _put_event(task_id, "error", {"message": error_msg})
+        _record_task_event(task_id, "error", {"message": error_msg})
 
     finally:
         # 发送结束标记
@@ -307,6 +456,7 @@ async def start_research(request: ResearchRequest):
         "task_id": task_id,
         "question": request.question,
         "status": "pending",
+        "progress": 0.0,
         "created_at": datetime.now().isoformat(),
         "scores": [],
         "current_cycle": 0
@@ -820,6 +970,7 @@ async def confirm_clarify(clarify_id: str, request: ClarifyConfirmRequest):
         "task_id": task_id,
         "question": session["question"],
         "status": "pending",
+        "progress": 0.0,
         "created_at": datetime.now().isoformat(),
         "scores": [],
         "current_cycle": 0,
@@ -899,9 +1050,10 @@ async def update_settings(request: SettingsRequest):
         if request.base_url is not None:
             url = request.base_url.strip()
             if url:
-                config.API_BASE_URL = url
-                config.ZHIPU_BASE_URL = url
-                changes["base_url"] = url
+                normalized = config.normalize_openai_base_url(url)
+                config.API_BASE_URL = normalized
+                config.ZHIPU_BASE_URL = normalized
+                changes["base_url"] = normalized
 
         if request.core_model is not None:
             m = request.core_model.strip()

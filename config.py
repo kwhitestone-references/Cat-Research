@@ -165,16 +165,19 @@ CONCLUSION_VALIDATOR_MODEL   = SUPPORT_MODEL
 WORKSPACE_DIR = os.path.join(os.path.dirname(__file__), "workspace")
 
 # === 研究配置 ===
-MAX_IMPROVEMENT_CYCLES = 5         # 最多改进循环次数
-MIN_IMPROVEMENT_CYCLES = 2         # 强制最少2次
+MAX_IMPROVEMENT_CYCLES = 3         # 最多改进循环次数
+MIN_IMPROVEMENT_CYCLES = 1         # 最少改进循环次数
 MAX_AGENT_TURNS = 40               # 单个智能体最大交互轮数
 MAX_SEARCH_RESULTS = 8             # 每次搜索最多返回结果数
 MAX_FETCH_CHARS = 6000             # 每个网页最多提取字符数
-QUALITY_THRESHOLD = 8.0            # 质量阈值（满分10分），高于此值才可提前结束
+QUALITY_THRESHOLD = 6.0            # 质量阈值（满分10分），高于此值才可提前结束
 
 # === 显示配置 ===
 SHOW_AGENT_THOUGHTS = True         # 是否显示智能体工作细节
 SEPARATOR = "=" * 70
+# 是否向 OpenAI 兼容网关发送 provider-specific thinking 参数。
+# 默认关闭，避免不支持该扩展参数的网关直接返回 400。
+ENABLE_PROVIDER_THINKING = os.environ.get("ENABLE_PROVIDER_THINKING", "false").lower() == "true"
 
 # === 上下文压缩配置 ===
 # 单个智能体对话超过此字符数时自动压缩（约 30k token，每字符约 4 字节）
