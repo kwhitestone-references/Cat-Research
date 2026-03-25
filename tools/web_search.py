@@ -81,22 +81,26 @@ def web_search(query: str, max_results: int = 8) -> str:
     搜索网络信息，优先使用智谱 API，失败时降级到 DuckDuckGo
     返回 JSON 格式的搜索结果列表
     """
-    # 优先：智谱搜索 API
-    try:
-        recency = _auto_recency(query)
-        results = _zhipu_search(query, max_results, recency_filter=recency)
-        if results:
-            return json.dumps({
-                "status": "success",
-                "source": "zhipu",
-                "query": query,
-                "count": len(results),
-                "results": results
-            }, ensure_ascii=False, indent=2)
-    except Exception as e:
-        print(f"  [搜索] 智谱搜索失败: {str(e)[:80]}，降级到 DuckDuckGo", flush=True)
+    # 仅当 base_url 指向智谱平台时才尝试智谱搜索 API，否则直接走 DuckDuckGo
+    from config import API_BASE_URL
+    _is_zhipu = "open.bigmodel.cn" in (API_BASE_URL or "")
 
-    # 降级：DuckDuckGo
+    if _is_zhipu:
+        try:
+            recency = _auto_recency(query)
+            results = _zhipu_search(query, max_results, recency_filter=recency)
+            if results:
+                return json.dumps({
+                    "status": "success",
+                    "source": "zhipu",
+                    "query": query,
+                    "count": len(results),
+                    "results": results
+                }, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"  [搜索] 智谱搜索失败: {str(e)[:80]}，降级到 DuckDuckGo", flush=True)
+
+    # DuckDuckGo 搜索
     try:
         try:
             from ddgs import DDGS

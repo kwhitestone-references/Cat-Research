@@ -40,17 +40,29 @@ class BaseAgent:
 
     def _define_tools(self) -> list:
         """定义智能体可用的工具集（OpenAI 格式）"""
-        # ── 智谱内置网页搜索（由智谱后端执行，结果自动注入模型上下文）──
-        builtin_web_search = {
-            "type": "web_search",
-            "web_search": {
-                "enable": True,
-                "search_result": True   # 将搜索结果附加到响应中
-            }
-        }
-
-        # ── 自定义函数工具（不含 web_search，已由内置搜索覆盖）──
+        # ── 自定义函数工具。保持标准 function schema，兼容通用 OpenAI 网关。──
         tool_defs = [
+            {
+                "name": "web_search",
+                "description": (
+                    "执行网页搜索并返回结构化结果列表。"
+                    "适合先搜索主题，再对有价值的链接使用 web_fetch 获取全文。"
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "搜索关键词或问题"
+                        },
+                        "max_results": {
+                            "type": "integer",
+                            "description": "最多返回结果数，默认 8"
+                        }
+                    },
+                    "required": ["query"]
+                }
+            },
             {
                 "name": "web_fetch",
                 "description": (
@@ -167,14 +179,15 @@ class BaseAgent:
                 }
             }
         ]
-        # 内置搜索在前，自定义函数工具在后
-        return [builtin_web_search] + [{"type": "function", "function": d} for d in tool_defs]
+        return [{"type": "function", "function": d} for d in tool_defs]
 
     def _execute_tool(self, tool_name: str, tool_input: dict) -> str:
-        """执行工具调用并返回结果（web_search 由智谱内置处理，不在此执行）"""
+        """执行工具调用并返回结果。"""
         self._tool_call_count += 1
         try:
-            if tool_name == "web_fetch":
+            if tool_name == "web_search":
+                return web_search(tool_input["query"], tool_input.get("max_results", 8))
+            elif tool_name == "web_fetch":
                 return web_fetch(tool_input["url"])
             elif tool_name == "read_file":
                 return read_file(tool_input["path"])
@@ -250,7 +263,7 @@ class BaseAgent:
             resp = self.client.chat.completions.create(
                 model=self.model,
                 messages=[{"role": "user", "content": summary_prompt}],
-                max_tokens=2000,
+                max_completion_tokens=2000,
                 temperature=0.1,
                 stream=False
             )
@@ -314,17 +327,16 @@ class BaseAgent:
                         except Exception:
                             pass
 
-                    # 流式调用（启用深度思考，优化 research 参数）
+                    # 流式调用。避免发送 provider-specific 参数，保持对通用 OpenAI 网关兼容。
                     stream = self.client.chat.completions.create(
                         model=self.model,
                         messages=messages,
                         tools=self.tools,
                         tool_choice="auto",
-                        max_tokens=16384,
+                        max_completion_tokens=16384,
                         temperature=0.3,     # 研究场景需要低温度保证准确性
                         top_p=0.85,
-                        stream=True,
-                        extra_body={"thinking": {"type": "enabled"}}
+                        stream=True
                     )
 
                     # 收集流式输出
@@ -335,6 +347,16 @@ class BaseAgent:
                     turn_output_tokens = 0
 
                     for chunk in stream:
+                        if self.stop_event and self.stop_event.is_set():
+                            try:
+                                close_stream = getattr(stream, "close", None)
+                                if callable(close_stream):
+                                    close_stream()
+                            except Exception:
+                                pass
+                            print(f"  [{self.name}] 流式输出阶段收到停止信号，中断执行", flush=True)
+                            return f"[已停止] 智能体 [{self.name}] 收到停止指令"
+
                         # 捕获 usage（通常在最后一个 chunk）
                         usage = getattr(chunk, "usage", None)
                         if usage:
@@ -425,11 +447,13 @@ class BaseAgent:
                     if "rate" in err.lower() or "429" in err:
                         wait = 30 * (attempt + 1)
                         print(f"  [警告] API 限速，等待 {wait}s（第 {attempt+1}/3 次）...", flush=True)
-                        time.sleep(wait)
+                        if self.stop_event and self.stop_event.wait(timeout=wait):
+                            return f"[已停止] 智能体 [{self.name}] 收到停止指令"
                     elif attempt < 3:
                         wait = 5 * (2 ** attempt)
                         print(f"  [警告] API 调用出错（{type(e).__name__}），{wait}s 后重试...", flush=True)
-                        time.sleep(wait)
+                        if self.stop_event and self.stop_event.wait(timeout=wait):
+                            return f"[已停止] 智能体 [{self.name}] 收到停止指令"
                     else:
                         print(f"  [错误] API 调用失败: {err}", flush=True)
                         return f"智能体 [{self.name}] 遇到错误: {err}"
@@ -465,23 +489,11 @@ class BaseAgent:
 
             # 执行每个工具并将结果追加
             for tc in tool_calls:
-                name = tc["name"]
+                if self.stop_event and self.stop_event.is_set():
+                    print(f"  [{self.name}] 工具执行前收到停止信号，中断执行", flush=True)
+                    return f"[已停止] 智能体 [{self.name}] 收到停止指令"
 
-                # 智谱内置 web_search：搜索结果已由后端自动注入，无需我们执行
-                if name == "web_search" or tc.get("type") == "web_search":
-                    try:
-                        args = json.loads(tc["arguments"]) if tc["arguments"] else {}
-                    except Exception:
-                        args = {}
-                    query = args.get("query", "搜索中")
-                    self._print_progress(f"[内置搜索] {query[:60]}")
-                    # 回传空确认，让模型继续（搜索结果已在模型上下文中）
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc["id"],
-                        "content": "已完成网页搜索，结果已整合到上下文中。"
-                    })
-                    continue
+                name = tc["name"]
 
                 try:
                     args = json.loads(tc["arguments"]) if tc["arguments"] else {}
@@ -489,7 +501,9 @@ class BaseAgent:
                     args = {}
 
                 # 显示自定义工具进度（执行前）
-                if name == "web_fetch":
+                if name == "web_search":
+                    self._print_progress(f"🔎 搜索网页: {args.get('query', '')[:70]}")
+                elif name == "web_fetch":
                     self._print_progress(f"🌐 抓取页面: {args.get('url', '')[:70]}")
                 elif name == "write_file":
                     self._print_progress(f"💾 写入文件: {args.get('path', '').split('/')[-1]}")
@@ -503,7 +517,9 @@ class BaseAgent:
                 result = self._execute_tool(name, args)
 
                 # 工具执行完毕后推送结果摘要
-                if name == "web_fetch":
+                if name == "web_search":
+                    self._print_progress(f"✔ 搜索完成")
+                elif name == "web_fetch":
                     chars = len(result) if result else 0
                     self._print_progress(f"✔ 页面内容获取完成（{chars} 字符）")
                 elif name == "write_file":

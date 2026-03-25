@@ -4,6 +4,7 @@
 import os
 import json
 from datetime import datetime
+from urllib.parse import urlparse, urlunparse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -101,6 +102,25 @@ def save_settings(data: dict):
     with open(_SETTINGS_FILE, 'w', encoding='utf-8') as f:
         json.dump(existing, f, ensure_ascii=False, indent=2)
 
+
+def normalize_openai_base_url(value: str) -> str:
+    """Normalize OpenAI-compatible base URLs so bare hosts default to /v1."""
+    raw = (value or "").strip()
+    if not raw:
+        return raw
+
+    trimmed = raw.rstrip("/")
+    try:
+        parsed = urlparse(trimmed)
+    except Exception:
+        return trimmed
+
+    path = (parsed.path or "").rstrip("/")
+    if not path:
+        path = "/v1"
+
+    return urlunparse(parsed._replace(path=path, params="", query="", fragment=""))
+
 # 加载持久化设置（优先级：环境变量 > settings.json > 空）
 _saved = _load_settings_file()
 
@@ -109,10 +129,12 @@ _saved = _load_settings_file()
 API_KEY  = (os.environ.get("ZHIPU_API_KEY", "")
             or os.environ.get("OPENAI_API_KEY", "")
             or _saved.get("api_key", ""))
-API_BASE_URL = (os.environ.get("ZHIPU_BASE_URL", "")
-                or os.environ.get("OPENAI_BASE_URL", "")
-                or _saved.get("base_url", "")
-                or "https://open.bigmodel.cn/api/paas/v4/")
+API_BASE_URL = normalize_openai_base_url(
+    os.environ.get("ZHIPU_BASE_URL", "")
+    or os.environ.get("OPENAI_BASE_URL", "")
+    or _saved.get("base_url", "")
+    or "https://open.bigmodel.cn/api/paas/v4/"
+)
 
 # 向后兼容别名
 ZHIPU_API_KEY  = API_KEY

@@ -69,6 +69,9 @@ class SettingsRequest(BaseModel):
     base_url: Optional[str] = None
     core_model: Optional[str] = None
     support_model: Optional[str] = None
+    min_cycles: Optional[int] = None
+    max_cycles: Optional[int] = None
+    quality_threshold: Optional[float] = None
 
 
 class ClarifyStartRequest(BaseModel):
@@ -180,6 +183,21 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
                     _task_status[task_id]["scores"] = scores
                 elif event_type == "confidence_report":
                     _task_status[task_id]["confidence_report"] = data
+            elif event_type == "token_usage":
+                    usage = _task_status[task_id].setdefault("token_usage", {
+                        "total_input_tokens": 0,
+                        "total_output_tokens": 0,
+                        "by_agent": {}
+                    })
+                    agent_name = data.get("agent", "unknown")
+                    usage["total_input_tokens"] += data.get("turn_input", 0)
+                    usage["total_output_tokens"] += data.get("turn_output", 0)
+                    agent_usage = usage["by_agent"].setdefault(agent_name, {
+                        "input_tokens": 0, "output_tokens": 0, "calls": 0
+                    })
+                    agent_usage["input_tokens"] += data.get("turn_input", 0)
+                    agent_usage["output_tokens"] += data.get("turn_output", 0)
+                    agent_usage["calls"] += 1
             except Exception:
                 pass  # 回调失败不中断主流程
 
@@ -204,10 +222,40 @@ def _run_research_task(task_id: str, question: str, clarification: Optional[str]
         _task_status[task_id]["result"] = result
         _task_status[task_id]["workspace"] = str(orchestrator.workspace)
         _task_status[task_id]["session_id"] = orchestrator.session_id
+
+        # Collect final token stats from orchestrator agents
+        token_usage = _task_status[task_id].get("token_usage", {
+            "total_input_tokens": 0, "total_output_tokens": 0, "by_agent": {}
+        })
+        for agent in [orchestrator.planner, orchestrator.researcher,
+                      orchestrator.analyst, orchestrator.writer,
+                      orchestrator.critic, orchestrator.source_verifier,
+                      orchestrator.fact_checker, orchestrator.conclusion_validator]:
+            name = getattr(agent, "name", type(agent).__name__)
+            inp = getattr(agent, "_total_input_tokens", 0)
+            out = getattr(agent, "_total_output_tokens", 0)
+            if inp or out:
+                existing = token_usage["by_agent"].get(name, {
+                    "input_tokens": 0, "output_tokens": 0, "calls": 0
+                })
+                # Use max of callback-tracked vs agent-tracked (in-process they match)
+                existing["input_tokens"] = max(existing.get("input_tokens", 0), inp)
+                existing["output_tokens"] = max(existing.get("output_tokens", 0), out)
+                token_usage["by_agent"][name] = existing
+        # Recompute totals from by_agent
+        token_usage["total_input_tokens"] = sum(
+            a.get("input_tokens", 0) for a in token_usage["by_agent"].values()
+        )
+        token_usage["total_output_tokens"] = sum(
+            a.get("output_tokens", 0) for a in token_usage["by_agent"].values()
+        )
+        _task_status[task_id]["token_usage"] = token_usage
+
         _put_event(task_id, "completed", {
             "result": result[:500] + "..." if len(result) > 500 else result,
             "workspace": str(orchestrator.workspace),
-            "session_id": orchestrator.session_id
+            "session_id": orchestrator.session_id,
+            "token_usage": token_usage
         })
 
     except Exception as e:
@@ -350,7 +398,8 @@ async def get_task_result(task_id: str):
         "workspace": status.get("workspace", ""),
         "session_id": status.get("session_id", ""),
         "confidence_report": status.get("confidence_report", {}),
-        "plan": status.get("plan", {})
+        "plan": status.get("plan", {}),
+        "token_usage": status.get("token_usage", {})
     }
 
 
@@ -874,6 +923,27 @@ async def update_settings(request: SettingsRequest):
                 config.FACT_CHECKER_MODEL = m
                 config.CONCLUSION_VALIDATOR_MODEL = m
                 changes["support_model"] = m
+
+        if request.min_cycles is not None:
+            if 1 <= request.min_cycles <= 10:
+                config.MIN_IMPROVEMENT_CYCLES = request.min_cycles
+                changes["min_cycles"] = request.min_cycles
+            else:
+                raise HTTPException(status_code=400, detail="min_cycles 必须在 1-10 之间")
+
+        if request.max_cycles is not None:
+            if 1 <= request.max_cycles <= 20:
+                config.MAX_IMPROVEMENT_CYCLES = request.max_cycles
+                changes["max_cycles"] = request.max_cycles
+            else:
+                raise HTTPException(status_code=400, detail="max_cycles 必须在 1-20 之间")
+
+        if request.quality_threshold is not None:
+            if 0.0 <= request.quality_threshold <= 10.0:
+                config.QUALITY_THRESHOLD = request.quality_threshold
+                changes["quality_threshold"] = request.quality_threshold
+            else:
+                raise HTTPException(status_code=400, detail="quality_threshold 必须在 0-10 之间")
 
         save_settings(changes)
         return {"updated": list(changes.keys()), "message": "设置已保存"}

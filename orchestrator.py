@@ -888,12 +888,33 @@ class ResearchOrchestrator:
         total_done = len(all_scores)
         final_score = all_scores[-1] if all_scores else 0
 
+        # 汇总所有智能体的 token 消耗
+        _agents = [self.planner, self.researcher, self.analyst, self.writer,
+                   self.critic, self.source_verifier, self.fact_checker,
+                   self.conclusion_validator]
+        _by_agent = {}
+        _total_in = 0
+        _total_out = 0
+        for _ag in _agents:
+            _name = getattr(_ag, "name", type(_ag).__name__)
+            _inp = getattr(_ag, "_total_input_tokens", 0)
+            _out = getattr(_ag, "_total_output_tokens", 0)
+            if _inp or _out:
+                _by_agent[_name] = {"input_tokens": _inp, "output_tokens": _out}
+                _total_in += _inp
+                _total_out += _out
+
         # 推送研究统计（供前端"研究统计"面板显示）
         self._emit("stats", {
             "cycles": total_done,
             "claims_checked": latest_fact_check.get("total_claims_checked", 0) if latest_fact_check else 0,
             "total_sources": source_verification.get("total_sources", 0) if source_verification else 0,
             "final_score": round(final_score, 1),
+            "token_usage": {
+                "total_input_tokens": _total_in,
+                "total_output_tokens": _total_out,
+                "by_agent": _by_agent
+            }
         })
         final_file = os.path.join(self.workspace, "09_final.md")
 
@@ -955,6 +976,10 @@ class ResearchOrchestrator:
         print(f"📁 工作空间: {self.workspace}", flush=True)
         print(f"📄 最终报告: {final_file}", flush=True)
         print(f"📋 置信度报告: {confidence_report_file}", flush=True)
+        print(f"🔢 Token 消耗: 输入 {_total_in:,} | 输出 {_total_out:,} | 合计 {_total_in + _total_out:,}", flush=True)
+        if _by_agent:
+            for _an, _au in sorted(_by_agent.items(), key=lambda x: -(x[1]["input_tokens"]+x[1]["output_tokens"])):
+                print(f"   └─ {_an}: 输入 {_au['input_tokens']:,} | 输出 {_au['output_tokens']:,}", flush=True)
 
         if os.path.exists(final_file):
             return read_file(final_file)
