@@ -136,10 +136,37 @@ API_BASE_URL = normalize_openai_base_url(
     or "https://open.bigmodel.cn/api/paas/v4/"
 )
 
+# 部署环境变量显式配置的 key（设置后 /api/settings 不得覆盖，见 MS #101531）
+ENV_API_KEY = os.environ.get("ZHIPU_API_KEY", "") or os.environ.get("OPENAI_API_KEY", "")
+
 # 向后兼容别名
 ZHIPU_API_KEY  = API_KEY
 ZHIPU_BASE_URL = API_BASE_URL
 ANTHROPIC_API_KEY = API_KEY
+
+# === 任务级凭据（MS #101531）===
+# 每个研究任务跑在独立线程里，新线程的 contextvars 为空；
+# 任务注入的 key/base_url 只在本任务内可见，不再写进进程全局，
+# 不会残留给后续请求（例如澄清智能体）。
+from contextvars import ContextVar
+_task_api_key: ContextVar[str] = ContextVar("task_api_key", default="")
+_task_base_url: ContextVar[str] = ContextVar("task_base_url", default="")
+
+
+def set_task_credentials(api_key: str = "", base_url: str = ""):
+    """在当前任务上下文内设置凭据，不修改进程级全局配置"""
+    _task_api_key.set((api_key or "").strip())
+    _task_base_url.set(normalize_openai_base_url(base_url or ""))
+
+
+def get_api_key() -> str:
+    """当前任务的 key；任务外返回部署默认值"""
+    return _task_api_key.get() or API_KEY
+
+
+def get_base_url() -> str:
+    """当前任务的 base_url；任务外返回部署默认值"""
+    return _task_base_url.get() or API_BASE_URL
 
 # === 模型配置 ===
 # 【核心模型】负责推理、规划、研究、分析、写作——对质量影响最大

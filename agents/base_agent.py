@@ -29,8 +29,8 @@ class BaseAgent:
         self.name = name
         self.system_prompt = system_prompt
         self.model = model or _config.ORCHESTRATOR_MODEL
-        # 每次实例化时从 config 读取最新值（运行时更新后立即生效）
-        self.client = OpenAI(api_key=_config.API_KEY, base_url=_config.API_BASE_URL)
+        # 读取当前任务上下文的凭据（任务外为部署默认值）
+        self.client = OpenAI(api_key=_config.get_api_key(), base_url=_config.get_base_url())
         self.tools = self._define_tools()
         self._tool_call_count = 0
         self._total_input_tokens = 0

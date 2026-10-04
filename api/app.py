@@ -85,6 +85,8 @@ class SettingsRequest(BaseModel):
 
 class ClarifyStartRequest(BaseModel):
     question: str
+    api_key: Optional[str] = None   # 可选：本次澄清会话专用凭据；不传则用部署默认值
+    base_url: Optional[str] = None
 
 class ClarifyReplyRequest(BaseModel):
     message: str
@@ -372,17 +374,9 @@ def _apply_task_runtime_config(task_config: dict):
     from agents import planner, researcher, analyst, writer, critic, source_verifier, fact_checker, conclusion_validator
     import orchestrator as orchestrator_module
 
-    api_key = (task_config.get("api_key") or "").strip()
-    if api_key:
-        config.API_KEY = api_key
-        config.ZHIPU_API_KEY = api_key
-        config.ANTHROPIC_API_KEY = api_key
-
-    base_url = (task_config.get("base_url") or "").strip()
-    if base_url:
-        normalized = config.normalize_openai_base_url(base_url)
-        config.API_BASE_URL = normalized
-        config.ZHIPU_BASE_URL = normalized
+    # 凭据只绑定到当前任务线程，不写进程全局（MS #101531：
+    # 写全局会让后续澄清请求复用本任务的 engine 临时 key，过期后 401）
+    config.set_task_credentials(task_config.get("api_key"), task_config.get("base_url"))
 
     core_model = (task_config.get("core_model") or "").strip()
     if core_model:
@@ -1086,6 +1080,17 @@ async def update_config(request: ConfigRequest):
     return {"updated": changes, "message": "配置已更新（重启后恢复默认值）"}
 
 
+_AUTH_EXPIRED_MSG = "研究服务授权已过期，请重新发起研究"
+
+
+def _clarify_http_error(prefix: str, e: Exception) -> HTTPException:
+    """澄清阶段的异常转成用户可读文案；原始异常只写日志（MS #101531）"""
+    print(f"[clarify] {prefix}: {type(e).__name__}: {e}", flush=True)
+    if getattr(e, "status_code", None) == 401:
+        return HTTPException(status_code=401, detail=_AUTH_EXPIRED_MSG)
+    return HTTPException(status_code=500, detail=f"{prefix}，请稍后重试")
+
+
 @app.post("/api/clarify")
 async def start_clarify(request: ClarifyStartRequest):
     """启动研究前置澄清会话，返回 AI 第一条澄清消息"""
@@ -1093,7 +1098,7 @@ async def start_clarify(request: ClarifyStartRequest):
         raise HTTPException(status_code=400, detail="研究问题不能为空")
     try:
         from agents.clarifier import ClarifierAgent
-        agent = ClarifierAgent()
+        agent = ClarifierAgent(request.api_key, request.base_url)
         result = agent.start(request.question.strip())
         clarify_id = str(uuid.uuid4())[:8]
         _clarify_sessions[clarify_id] = {
@@ -1102,6 +1107,8 @@ async def start_clarify(request: ClarifyStartRequest):
             "history": result.get("history", []),
             "summary": result.get("summary", {}),
             "turns": 1,
+            "api_key": request.api_key,
+            "base_url": request.base_url,
         }
         return {
             "clarify_id": clarify_id,
@@ -1111,7 +1118,7 @@ async def start_clarify(request: ClarifyStartRequest):
             "confidence": result.get("confidence", 0.0),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"澄清智能体启动失败：{str(e)}")
+        raise _clarify_http_error("澄清智能体启动失败", e)
 
 
 @app.post("/api/clarify/{clarify_id}/message")
@@ -1124,7 +1131,7 @@ async def clarify_message(clarify_id: str, request: ClarifyReplyRequest):
         raise HTTPException(status_code=400, detail="消息不能为空")
     try:
         from agents.clarifier import ClarifierAgent
-        agent = ClarifierAgent()
+        agent = ClarifierAgent(session.get("api_key"), session.get("base_url"))
         result = agent.reply(session["history"], request.message.strip())
         session["history"] = result.get("history", session["history"])
         session["summary"] = result.get("summary", session["summary"])
@@ -1137,7 +1144,7 @@ async def clarify_message(clarify_id: str, request: ClarifyReplyRequest):
             "turns": session["turns"],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"澄清对话失败：{str(e)}")
+        raise _clarify_http_error("澄清对话失败", e)
 
 
 @app.post("/api/clarify/{clarify_id}/confirm")
@@ -1254,6 +1261,13 @@ async def update_settings(request: SettingsRequest):
 
     try:
         changes = {}
+
+        # 部署环境变量已提供凭据时，不允许运行时覆盖（MS #101531：
+        # MCP 侧会把任务临时 key 推到这里，写进全局后被澄清等请求复用 → 401）。
+        # 任务凭据经 /api/research 按任务传入，不依赖这里。
+        if config.ENV_API_KEY:
+            request.api_key = None
+            request.base_url = None
 
         # api_key：非空才更新，防止意外清空
         if request.api_key is not None:

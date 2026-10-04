@@ -15,10 +15,10 @@ def _zhipu_search(query: str, max_results: int = 8,
     返回结果列表 [{title, url, snippet}]
     recency_filter: noLimit / year / month / week / day
     """
-    from config import ZHIPU_API_KEY
+    from config import get_api_key
 
     headers = {
-        "Authorization": f"Bearer {ZHIPU_API_KEY}",
+        "Authorization": f"Bearer {get_api_key()}",
         "Content-Type": "application/json"
     }
     payload = {
@@ -82,8 +82,8 @@ def web_search(query: str, max_results: int = 8) -> str:
     返回 JSON 格式的搜索结果列表
     """
     # 仅当 base_url 指向智谱平台时才尝试智谱搜索 API，否则直接走 DuckDuckGo
-    from config import API_BASE_URL
-    _is_zhipu = "open.bigmodel.cn" in (API_BASE_URL or "")
+    from config import get_base_url
+    _is_zhipu = "open.bigmodel.cn" in (get_base_url() or "")
 
     if _is_zhipu:
         try:

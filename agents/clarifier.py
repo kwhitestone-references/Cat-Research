@@ -83,8 +83,13 @@ CLARIFIER_SYSTEM = _build_clarifier_system()
 class ClarifierAgent:
     """研究前置澄清智能体（纯对话，无工具调用）"""
 
+    def __init__(self, api_key: str = "", base_url: str = ""):
+        # 只用本次请求自带的凭据；没有就用部署默认值，绝不读其他任务残留的 key
+        self.api_key = (api_key or "").strip() or _config.get_api_key()
+        self.base_url = _config.normalize_openai_base_url(base_url or "") or _config.get_base_url()
+
     def _call(self, messages: list) -> dict:
-        client = OpenAI(api_key=_config.API_KEY, base_url=_config.API_BASE_URL)
+        client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         resp = client.chat.completions.create(
             model=_config.CORE_MODEL,
             messages=messages,

@@ -353,9 +353,7 @@ class ResearchOrchestrator:
     def _ask_clarification(self, question: str) -> str:
         """使用智谱 GLM API 生成澄清问题，然后请求用户确认"""
         from openai import OpenAI
-        from config import ZHIPU_API_KEY, ZHIPU_BASE_URL
-
-        client = OpenAI(api_key=ZHIPU_API_KEY, base_url=ZHIPU_BASE_URL)
+        client = OpenAI(api_key=_config.get_api_key(), base_url=_config.get_base_url())
 
         print(f"\n{SEPARATOR}", flush=True)
         print("🧠 正在分析您的问题...", flush=True)
